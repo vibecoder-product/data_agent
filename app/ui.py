@@ -6,16 +6,19 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+# Add project root to Python path
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-	os.environ.setdefault("PYTHONPATH", f"{str(ROOT)}:{os.environ.get('PYTHONPATH','')}")
-	sys.path.append(str(ROOT))
+sys.path.insert(0, str(ROOT))
 
-from core.generate import generate_dummy_data, generate_and_save_csv
-from agent.brain import run_agent_on_dataframe
-from core.mailer import read_outbox
-from core.connectors import get_connector
-from agent.actions import approve_action, reject_action
+try:
+    from core.generate import generate_dummy_data, generate_and_save_csv
+    from agent.brain import run_agent_on_dataframe
+    from core.mailer import read_outbox
+    from core.connectors import get_connector
+    from agent.actions import approve_action, reject_action
+except ImportError as e:
+    st.error(f"Import error: {e}")
+    st.stop()
 
 
 st.set_page_config(page_title="Autonomous BI Agent", layout="wide")

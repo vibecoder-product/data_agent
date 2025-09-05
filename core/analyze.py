@@ -2,10 +2,6 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Tuple
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.seasonal import STL
-import pandas as pd
-import numpy as np
-from typing import List, Dict, Any, Tuple
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
 import warnings
@@ -47,13 +43,14 @@ def stl_residual_anomalies(y: pd.Series) -> Tuple[pd.Series, pd.Series]:
 	"""Return residual and robust z-scores. Fallback to simple detrend when short."""
 	if len(y) < 14:
 		# Simple detrend using rolling median for short sequences
-		roll = y.rolling(window=max(3, len(y)//3)).median().fillna(method="bfill").fillna(method="ffill")
+		roll = y.rolling(window=max(3, len(y)//3)).median().bfill().ffill()
 		residual = y - roll
 		z = robust_z_scores(residual)
 		return residual, z
-	stl = STL(y, robust=True, period=max(7, min(30, max(7, len(y)//6))))
-	res = stl.fit()
-	residual = pd.Series(res.resid, index=y.index)
+	# Simple detrend using rolling median for longer sequences
+	period = max(7, min(30, max(7, len(y)//6)))
+	roll = y.rolling(window=period).median().bfill().ffill()
+	residual = y - roll
 	z = robust_z_scores(residual)
 	return residual, z
 
@@ -379,10 +376,10 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 			y = g[m].astype(float).fillna(0.0)
 			if len(y) < 14:
 				continue
-			# STL seasonal strength estimation
-			stl = STL(y, robust=True, period=max(7, min(30, max(7, len(y)//6))))
-			res = stl.fit()
-			seasonal_var = np.var(res.seasonal)
+			# Simple seasonal strength estimation using rolling mean
+			period = max(7, min(30, max(7, len(y)//6)))
+			rolling_mean = y.rolling(window=period, center=True).mean()
+			seasonal_var = np.var(rolling_mean.dropna())
 			total_var = np.var(y) + 1e-9
 			seasonal_strength = float(min(1.0, max(0.0, seasonal_var / total_var)))
 			trend_slope = float(np.polyfit(np.arange(len(y)), y.values, 1)[0])
