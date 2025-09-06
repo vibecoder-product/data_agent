@@ -29,7 +29,9 @@ class MetricAgent:
     
     def analyze_metrics(self, df: pd.DataFrame, plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Analyze metrics autonomously."""
-        insights = analyze_data_autonomously(df)
+        insights, patterns = analyze_data_autonomously(df)
+        # Store patterns for later use
+        self.patterns = patterns
         return insights
 
 class DrilldownAgent:
@@ -204,10 +206,7 @@ def run_agent_on_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
         rows.append(record)
     
     # Get patterns from analysis
-    patterns = []
-    for insight in enhanced_insights:
-        if insight.get('type') == 'pattern':
-            patterns.append(insight)
+    patterns = getattr(metric_agent, 'patterns', [])
     
     logs.append(f"[System] Analysis complete: {len(rows)} insights processed, {len(patterns)} patterns found")
     
