@@ -1,10 +1,68 @@
 import pandas as pd
 from typing import Dict, Any, List
 from core.analyze import analyze_data_autonomously
-from agent.actions import Insight, decide_action
+# from agent.actions import Insight, decide_action  # Removed Pydantic dependency
 from core.memory import append_memory
 from core.mailer import send_email_simulated
 from core.tools import *
+
+
+def decide_action(insight: Dict[str, Any]) -> Dict[str, Any]:
+    """Decide what action to take based on insight."""
+    insight_type = insight.get('kind', 'unknown')
+    confidence = insight.get('confidence', 0.8)
+    severity = insight.get('severity', 'medium')
+    
+    # Simple heuristic-based action mapping
+    if insight_type == 'anomaly':
+        if severity == 'high' and confidence > 0.8:
+            action_type = "send_alert"
+            priority = "high"
+            status = "executed"
+            approval_required = False
+        elif severity == 'medium' and confidence > 0.6:
+            action_type = "create_jira_ticket"
+            priority = "medium"
+            status = "pending_approval"
+            approval_required = True
+        else:
+            action_type = "generate_report"
+            priority = "low"
+            status = "pending_approval"
+            approval_required = True
+    elif insight_type == 'trend':
+        if confidence > 0.7:
+            action_type = "schedule_meeting"
+            priority = "medium"
+            status = "pending_approval"
+            approval_required = True
+        else:
+            action_type = "generate_report"
+            priority = "low"
+            status = "pending_approval"
+            approval_required = True
+    else:
+        action_type = "generate_report"
+        priority = "low"
+        status = "pending_approval"
+        approval_required = True
+    
+    return {
+        "action_type": action_type,
+        "priority": priority,
+        "reasoning": f"Based on {insight_type} with {confidence:.1%} confidence",
+        "confidence": confidence,
+        "status": status,
+        "approval_required": approval_required,
+        "details": {
+            "insight_id": insight.get('id', 'unknown'),
+            "metric": insight.get('metric', 'unknown'),
+            "description": insight.get('description', 'No description'),
+            "subject": f"BI Alert: {insight.get('metric', 'Unknown Metric')}",
+            "body": f"Automated alert: {insight.get('description', 'No description')}",
+            "to": "admin@company.com"
+        }
+    }
 
 
 class PlannerAgent:
@@ -33,6 +91,8 @@ class MetricAgent:
 	def analyze_metrics(self, df: pd.DataFrame, plan: Dict[str, Any]) -> List[Dict[str, Any]]:
 		"""Analyze each metric for insights."""
 		insights, patterns = analyze_data_autonomously(df)
+		# Store patterns for later use
+		self.patterns = patterns
 		return insights
 
 
@@ -280,37 +340,38 @@ def run_agent_on_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
 	log.append({"agent": "System", "event": "Loaded historical actions", "details": {"count": len(historical_actions)}})
 	
 	for insight_dict in insights:
-		# Convert to Insight object
-		insight = Insight(**insight_dict)
+		# Use insight_dict directly (no Pydantic conversion)
+		insight = insight_dict
 		
 		# Drilldown Agent enhances the insight
 		enhanced_insight = drilldown_agent.drill_down(insight_dict, df)
-		log.append({"agent": drilldown_agent.name, "event": "Enhanced insight", "details": {"metric": insight.metric, "confidence": enhanced_insight['confidence']}})
+		log.append({"agent": drilldown_agent.name, "event": "Enhanced insight", "details": {"metric": insight.get('metric', 'unknown'), "confidence": enhanced_insight.get('confidence', 0.8)}})
 		
 		# Decide action based on insight
-		decision, action = decide_action(insight)
+		decision = decide_action(insight)
+		action = decision.copy()
 		
 		# Tool Agent executes the action
-		execution_result = tool_agent.execute_action(action.action_type, action.details)
-		log.append({"agent": tool_agent.name, "event": f"Executed {action.action_type}", "details": execution_result})
+		execution_result = tool_agent.execute_action(action['action_type'], action['details'])
+		log.append({"agent": tool_agent.name, "event": f"Executed {action['action_type']}", "details": execution_result})
 		
 		# Store the complete record
 		record = {
 			"insight": enhanced_insight,
-			"decision": decision.dict(),
-			"action": action.dict()
+			"decision": decision,
+			"action": action
 		}
 		rows.append(record)
 		
 		# Send email simulation
 		email_content = f"""
-		Insight: {insight.description}
-		Confidence: {insight.confidence:.1%}
-		Decision: {decision.action_type} (Priority: {decision.priority})
-		Action Status: {action.status}
+		Insight: {insight.get('description', 'No description')}
+		Confidence: {insight.get('confidence', 0.8):.1%}
+		Decision: {decision['action_type']} (Priority: {decision['priority']})
+		Action Status: {action['status']}
 		"""
 		send_email_simulated(
-			subject=f"BI Alert: {insight.kind} in {insight.metric}",
+			subject=f"BI Alert: {insight.get('kind', 'unknown')} in {insight.get('metric', 'Unknown Metric')}",
 			body=email_content,
 			to="analytics@company.com",
 			meta=record
@@ -319,9 +380,8 @@ def run_agent_on_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
 		# Store in memory
 		append_memory({"type": "insight_action", **record})
 	
-	# Extract patterns from analysis
-	_, detected_patterns = analyze_data_autonomously(df)
-	patterns = detected_patterns
+	# Get patterns from MetricAgent
+	patterns = getattr(metric_agent, 'patterns', [])
 	
 	log.append({"agent": "System", "event": "Analysis completed", "details": {"total_insights": len(insights), "total_patterns": len(patterns)}})
 	
