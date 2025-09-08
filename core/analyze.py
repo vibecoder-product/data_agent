@@ -543,8 +543,8 @@ def analyze_data_autonomously(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], L
 			insights.append({
 				"metric": metric,
 				"kind": "anomaly",
-				"dimension": None,
-				"segment": None,
+				"dimension": "(all)",
+				"segment": "(all)",
 				"description": full_description,
 				"confidence": confidence,
 				"details": anomaly
@@ -563,8 +563,8 @@ def analyze_data_autonomously(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], L
 			insights.append({
 				"metric": metric,
 				"kind": "change_point",
-				"dimension": None,
-				"segment": None,
+				"dimension": "(all)",
+				"segment": "(all)",
 				"description": full_description,
 				"confidence": confidence,
 				"details": change
@@ -588,8 +588,8 @@ def analyze_data_autonomously(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], L
 				insights.append({
 					"metric": metric,
 					"kind": "trend",
-					"dimension": None,
-					"segment": None,
+					"dimension": "(all)",
+					"segment": "(all)",
 					"description": full_description,
 					"confidence": confidence,
 					"details": {"slope": slope, "r_squared": trend_strength, "p_value": p_value, "trend_magnitude": trend_magnitude}
