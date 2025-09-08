@@ -276,11 +276,13 @@ if df is not None:
 			pattern_rows = []
 			for pattern in result['patterns']:
 				confidence = pattern.get('confidence', 0.8)
+				ptype = pattern.get('type') or pattern.get('pattern')
+				details_obj = pattern.get('details') if pattern.get('details') is not None else pattern.get('context', {})
 				pattern_rows.append({
-					"Type": pattern.get('type'),
+					"Type": ptype,
 					"Description": pattern.get('description'),
 					"Confidence": f"{get_confidence_color(confidence)} {confidence:.1%}",
-					"Details": str(pattern.get('details', {}))
+					"Details": str(details_obj)
 				})
 			st.dataframe(pd.DataFrame(pattern_rows), use_container_width=True, hide_index=True)
 		else:
