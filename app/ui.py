@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import time
 from typing import Optional
 from pathlib import Path
 import pandas as pd
@@ -73,10 +74,15 @@ with st.sidebar:
 		n_rows = st.slider("Rows", min_value=200, max_value=5000, value=500, step=100)
 		seed = st.number_input("Random seed", value=42)
 		gen_clicked = st.button("Generate CSV and Save")
-		generated_path = None
 		if gen_clicked:
-			generated_path = generate_and_save_csv("data/sample.csv", num_rows=int(n_rows), random_seed=int(seed))
-			st.success(f"Generated: {generated_path}")
+			# Ensure data directory exists and save with a timestamp to avoid overwrite
+			data_dir = ROOT / "data"
+			data_dir.mkdir(parents=True, exist_ok=True)
+			filename = f"sample_{int(time.time())}.csv"
+			full_path = str(data_dir / filename)
+			saved_path = generate_and_save_csv(full_path, num_rows=int(n_rows), random_seed=int(seed))
+			st.session_state.generated_path = saved_path
+			st.success(f"Generated and saved: {saved_path}")
 	
 	else:
 		# Database connection section
@@ -191,8 +197,9 @@ if data_source == "CSV Upload" and 'upload' in locals() and upload is not None:
 	except Exception as e:
 		st.error(f"Failed to parse CSV: {e}")
 
-elif data_source == "Generate Synthetic" and 'generated_path' in locals() and generated_path and Path(generated_path).exists():
-	df = pd.read_csv(generated_path)
+
+elif data_source == "Generate Synthetic" and hasattr(st.session_state, 'generated_path') and st.session_state.generated_path and Path(st.session_state.generated_path).exists():
+	df = pd.read_csv(st.session_state.generated_path)
 	st.success(f"Loaded generated CSV with shape {df.shape}")
 
 elif hasattr(st.session_state, 'current_df'):
@@ -206,6 +213,14 @@ else:
 if df is not None:
 	st.subheader("Preview")
 	st.dataframe(df.head(20), use_container_width=True)
+	# Offer full CSV download (not just the 20-row preview)
+	st.download_button(
+		label="Download full CSV",
+		data=df.to_csv(index=False).encode("utf-8"),
+		file_name="dataset.csv",
+		mime="text/csv",
+		key="download_full_csv"
+	)
 
 	result = None
 	if run_clicked:
