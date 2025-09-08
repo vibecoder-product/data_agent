@@ -8,58 +8,74 @@ from core.tools import *
 
 
 def decide_action(insight: Dict[str, Any]) -> Dict[str, Any]:
-    """Decide what action to take based on insight."""
+    """Decide what action to take based on insight with rich reasoning."""
     insight_type = insight.get('kind', 'unknown')
-    confidence = insight.get('confidence', 0.8)
+    confidence = float(insight.get('confidence', 0.8))
     severity = insight.get('severity', 'medium')
-    
+    metric = insight.get('metric', 'unknown')
+    dimension = insight.get('dimension')
+    segment = insight.get('segment')
+    desc = insight.get('description', '')
+    details = insight.get('details', {}) or {}
+
     # Simple heuristic-based action mapping
     if insight_type == 'anomaly':
         if severity == 'high' and confidence > 0.8:
-            action_type = "send_alert"
-            priority = "high"
-            status = "executed"
-            approval_required = False
-        elif severity == 'medium' and confidence > 0.6:
-            action_type = "create_jira_ticket"
-            priority = "medium"
-            status = "pending_approval"
-            approval_required = True
+            action_type = "send_alert"; priority = "high"; status = "executed"; approval_required = False
+        elif confidence > 0.7:
+            action_type = "create_jira_ticket"; priority = "medium"; status = "pending_approval"; approval_required = True
         else:
-            action_type = "generate_report"
-            priority = "low"
-            status = "pending_approval"
-            approval_required = True
+            action_type = "monitor"; priority = "low"; status = "pending_approval"; approval_required = True
     elif insight_type == 'trend':
         if confidence > 0.7:
-            action_type = "schedule_meeting"
-            priority = "medium"
-            status = "pending_approval"
-            approval_required = True
+            action_type = "schedule_meeting"; priority = "medium"; status = "pending_approval"; approval_required = True
         else:
-            action_type = "generate_report"
-            priority = "low"
-            status = "pending_approval"
-            approval_required = True
+            action_type = "generate_report"; priority = "low"; status = "pending_approval"; approval_required = True
+    elif insight_type in {"segment_gap", "distribution_skew", "extreme_tail", "backlog_trend", "sustained_high_rate", "sustained_low_rate"}:
+        action_type = "generate_report"; priority = "medium"; status = "pending_approval"; approval_required = True
     else:
-        action_type = "generate_report"
-        priority = "low"
-        status = "pending_approval"
-        approval_required = True
-    
+        action_type = "generate_report"; priority = "low"; status = "pending_approval"; approval_required = True
+
+    # Build rich reasoning string using available context
+    where = f" in {dimension}={segment}" if dimension and segment else ""
+    pieces = [f"{insight_type} detected on {metric}{where}"]
+    if 'deviation_percent' in details:
+        dev = abs(details.get('deviation_percent', 0.0))
+        expected = details.get('expected_value', details.get('baseline_mean'))
+        if expected is not None:
+            pieces.append(f"(~{dev:.1f}% vs expected {float(expected):.2f})")
+        else:
+            pieces.append(f"(~{dev:.1f}% deviation)")
+    if 'trend_magnitude' in details:
+        pieces.append(f"(trend magnitude ~{float(details['trend_magnitude']):.1f}%)")
+    if insight_type == 'segment_gap' and isinstance(details.get('by_segment_mean'), dict):
+        top = details.get('top'); bottom = details.get('bottom'); gap = details.get('gap')
+        pieces.append(f"(top: {top}, bottom: {bottom}, gap {gap:.2f})")
+    if insight_type.startswith('sustained_') and 'longest_run' in details:
+        pieces.append(f"({int(details['longest_run'])} consecutive periods)")
+    pieces.append(f"with {confidence:.1%} confidence")
+    action_hint = {
+        "send_alert": "Notifying stakeholders immediately",
+        "create_jira_ticket": "Opening a ticket for follow-up",
+        "schedule_meeting": "Syncing stakeholders to align next steps",
+        "monitor": "Continuing to monitor for stability",
+        "generate_report": "Compiling a detailed report with evidence"
+    }.get(action_type, "Proceeding with next step")
+    reasoning = f"{' '.join(pieces)}. {action_hint}.\nSummary: {desc}".strip()
+
     return {
         "action_type": action_type,
         "priority": priority,
-        "reasoning": f"Based on {insight_type} with {confidence:.1%} confidence",
+        "reasoning": reasoning,
         "confidence": confidence,
         "status": status,
         "approval_required": approval_required,
         "details": {
-            "insight_id": insight.get('id', 'unknown'),
-            "metric": insight.get('metric', 'unknown'),
-            "description": insight.get('description', 'No description'),
-            "subject": f"BI Alert: {insight.get('metric', 'Unknown Metric')}",
-            "body": f"Automated alert: {insight.get('description', 'No description')}",
+            "insight_id": insight.get('id', f"{metric}_{insight_type}"),
+            "metric": metric,
+            "description": desc,
+            "subject": f"BI Alert: {metric}",
+            "body": desc,
             "to": "admin@company.com"
         }
     }
