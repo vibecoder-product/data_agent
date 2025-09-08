@@ -426,7 +426,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 					segment="(all)",
 					description=f"{m} shows seasonality (strength={seasonal_strength:.2f})",
 					strength=seasonal_strength,
-					context={}
+					context={"seasonal_strength": seasonal_strength, "period_estimate": int(period)}
 				))
 			# else:
 			# 	print(f"    ❌ No seasonality in '{m}' (strength={seasonal_strength:.3f} < 0.05)")
@@ -437,7 +437,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 				segment="(all)",
 				description=f"{m} trend slope={trend_slope:.2f}",
 				strength=float(abs(trend_slope)),
-				context={}
+				context={"slope": trend_slope, "direction": ("increasing" if trend_slope > 0 else "decreasing")}
 			))
 
 	# Correlations between metrics
@@ -463,7 +463,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 					segment="(all)",
 					description=f"High correlation between {a} and {b} (r={r:.2f})",
 					strength=r,
-					context={}
+					context={"metrics": [a, b], "r": r}
 				))
 			# else:
 			# 	print(f"    ❌ No strong correlation: {a} ~ {b} (r={r:.3f} < 0.3)")
@@ -501,7 +501,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 						segment=str(seg),
 						description=f"Segment {dim}={seg} repeatedly shows anomalies across {cnt} metric(s)",
 						strength=float(cnt),
-						context={"metrics": metrics_map.get(str(seg), [])[:5]}
+						context={"metrics": metrics_map.get(str(seg), [])[:5], "count_metrics": int(cnt)}
 					))
 
 	# Rank patterns by strength
