@@ -609,7 +609,151 @@ def analyze_data_autonomously(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], L
 			"confidence": min(0.95, p.strength + 0.1),  # Convert strength to confidence
 			"context": p.context
 		})
-	
+
+	# --- Additional generic analyses (dataset-agnostic) ---
+
+	def _is_rate_metric(name: str) -> bool:
+		l = name.lower()
+		return any(k in l for k in ["rate", "ratio", "per_", "_per_", "per", "satisfaction", "csat", "nps", "score"])
+
+	def _is_count_metric(name: str) -> bool:
+		l = name.lower()
+		return any(k in l for k in ["count", "volume", "tickets", "ticket", "visits", "sessions", "orders"]) and not _is_rate_metric(name)
+
+	# 1) Segment performance gaps (category-level disparities)
+	cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+	for dim in cat_cols:
+		try:
+			g = df.groupby(dim)
+			num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+			num_cols = [c for c in num_cols if c.lower() not in {"serial_no", "serial", "id", "index"}]
+			for metric in num_cols:
+				series = g[metric].mean().dropna()
+				if len(series) < 2:
+					continue
+				gap = float(series.max() - series.min())
+				std = float(series.std() or 0.0)
+				if std > 0 and gap > 1.0 * std:
+					top_seg = series.idxmax()
+					bottom_seg = series.idxmin()
+					insights.append({
+						"metric": metric,
+						"kind": "segment_gap",
+						"dimension": dim,
+						"segment": None,
+						"description": f"Significant performance gap across {dim} for {metric}: {top_seg} vs {bottom_seg} (+{gap:.2f} vs baseline)",
+						"confidence": min(0.95, gap / (std + 1e-9)),
+						"details": {"by_segment_mean": series.to_dict(), "top": str(top_seg), "bottom": str(bottom_seg), "gap": gap, "std": std}
+					})
+		except Exception:
+			pass
+
+	# 2) Distribution-based insights (skewness and extreme tails)
+	num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+	num_cols = [c for c in num_cols if c.lower() not in {"serial_no", "serial", "id", "index"}]
+	for metric in num_cols:
+		col = pd.to_numeric(df[metric], errors='coerce').dropna()
+		if len(col) < 50:
+			continue
+		skew = float(col.skew())
+		p1, p5, p95, p99 = [float(col.quantile(q)) for q in [0.01, 0.05, 0.95, 0.99]]
+		if abs(skew) > 1.0:
+			insights.append({
+				"metric": metric,
+				"kind": "distribution_skew",
+				"dimension": None,
+				"segment": None,
+				"description": f"{metric} distribution is {'right' if skew>0 else 'left'}-skewed (skew={skew:.2f})",
+				"confidence": min(0.95, abs(skew) / 2.0),
+				"details": {"skew": skew, "p1": p1, "p5": p5, "p95": p95, "p99": p99}
+			})
+		# Extreme tail share
+		top_tail_share = float((col > p95).mean())
+		if top_tail_share > 0.1:
+			insights.append({
+				"metric": metric,
+				"kind": "extreme_tail",
+				"dimension": None,
+				"segment": None,
+				"description": f"{metric} has a heavy upper tail (>{p95:.2f}) affecting {top_tail_share:.0%} of rows",
+				"confidence": min(0.95, 0.5 + top_tail_share/2),
+				"details": {"threshold": p95, "share": top_tail_share}
+			})
+
+	# 3) Backlog/volume trends for count-like metrics (requires time)
+	date_candidates = [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower()]
+	if date_candidates:
+		date_col = date_candidates[0]
+		try:
+			by_date = df.copy()
+			by_date[date_col] = pd.to_datetime(by_date[date_col], errors='coerce')
+			by_date = by_date.dropna(subset=[date_col])
+			count_cols = [c for c in df.select_dtypes(include=[np.number]).columns if _is_count_metric(c)]
+			for metric in count_cols:
+				g = by_date.groupby(date_col)[metric].sum(min_count=1).sort_index()
+				if len(g) < 14 or g.mean() == 0:
+					continue
+				slope = float(np.polyfit(np.arange(len(g)), g.values, 1)[0])
+				pct = float((slope * len(g)) / (g.mean() + 1e-9) * 100)
+				if abs(pct) >= 20:
+					insights.append({
+						"metric": metric,
+						"kind": "backlog_trend",
+						"dimension": None,
+						"segment": None,
+						"description": f"{metric} shows a {'rising' if pct>0 else 'declining'} backlog/volume trend (~{pct:.1f}% over period)",
+						"confidence": min(0.95, min(1.0, abs(pct)/50)),
+						"details": {"slope": slope, "period_pct_change": pct, "points": len(g)}
+					})
+		except Exception:
+			pass
+
+	# 4) Sustained high/low rate patterns for rate-like metrics
+	rate_cols = [c for c in df.select_dtypes(include=[np.number]).columns if _is_rate_metric(c)]
+	if date_candidates:
+		date_col = date_candidates[0]
+		try:
+			by_date = df.copy()
+			by_date[date_col] = pd.to_datetime(by_date[date_col], errors='coerce')
+			by_date = by_date.dropna(subset=[date_col])
+			for metric in rate_cols:
+				g = by_date.groupby(date_col)[metric].mean().sort_index().astype(float)
+				if len(g) < 14:
+					continue
+				p75, p25 = float(g.quantile(0.75)), float(g.quantile(0.25))
+				# count consecutive periods above/below
+				above = (g > p75).astype(int)
+				below = (g < p25).astype(int)
+				def longest_run(s: pd.Series) -> int:
+					max_run = run = 0
+					for v in s.values:
+						run = run + 1 if v == 1 else 0
+						max_run = max(max_run, run)
+					return max_run
+				arun, brun = longest_run(above), longest_run(below)
+				if arun >= 4:
+					insights.append({
+						"metric": metric,
+						"kind": "sustained_high_rate",
+						"dimension": None,
+						"segment": None,
+						"description": f"{metric} sustained high levels for {arun} consecutive periods (>= P75)",
+						"confidence": min(0.95, 0.6 + arun/20),
+						"details": {"threshold": p75, "longest_run": arun}
+					})
+				if brun >= 4:
+					insights.append({
+						"metric": metric,
+						"kind": "sustained_low_rate",
+						"dimension": None,
+						"segment": None,
+						"description": f"{metric} sustained low levels for {brun} consecutive periods (<= P25)",
+						"confidence": min(0.95, 0.6 + brun/20),
+						"details": {"threshold": p25, "longest_run": brun}
+					})
+		except Exception:
+			pass
+
 	return insights, patterns
 
 
