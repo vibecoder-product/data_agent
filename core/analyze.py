@@ -287,7 +287,8 @@ def analyze_auto(df: pd.DataFrame, date_col: str = "date") -> List[Insight]:
 		local_df[date_col] = pd.to_datetime(local_df[date_col], errors="coerce")
 		local_df = local_df.dropna(subset=[date_col])
 
-	numeric_cols = [c for c in local_df.select_dtypes(include=[np.number]).columns if c != date_col]
+	# Exclude identifier-like numeric columns from business patterns
+	numeric_cols = [c for c in local_df.select_dtypes(include=[np.number]).columns if c != date_col and c.lower() not in {"serial_no", "serial", "id", "index"}]
 	cat_cols = [c for c in local_df.select_dtypes(include=["object", "category"]).columns]
 
 	# Global analysis
@@ -475,6 +476,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 			for seg, seg_df in local_df.groupby(dim):
 				g = seg_df.groupby(date_col)[numeric_cols].sum(min_count=1).sort_index()
 				flagged = 0
+				flagged_metrics: List[str] = []
 				for m in numeric_cols:
 					y = g[m].astype(float).fillna(0.0)
 					if len(y) < 14:
@@ -483,6 +485,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 					outliers = z[np.abs(z) > 2.5]
 					if not outliers.empty:
 						flagged += 1
+						flagged_metrics.append(m)
 				counts[str(seg)] = counts.get(str(seg), 0) + flagged
 			# top recurring
 			top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:3]
@@ -493,9 +496,9 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 						metric="(various)",
 						dimension=dim,
 						segment=str(seg),
-						description=f"Segment {dim}={seg} repeatedly shows anomalies across metrics",
+						description=f"Segment {dim}={seg} repeatedly shows anomalies across {cnt} metric(s)",
 						strength=float(cnt),
-						context={}
+						context={"metrics": flagged_metrics[:5]}
 					))
 
 	# Rank patterns by strength
