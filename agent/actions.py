@@ -1,36 +1,12 @@
-from typing import Dict, Any, Optional
-from pydantic import BaseModel
-import random
+from typing import Dict, Any, Optional, Tuple
 
 
-class Insight(BaseModel):
-	metric: str
-	kind: str  # anomaly, trend, pattern, etc.
-	dimension: Optional[str] = None
-	segment: Optional[str] = None
-	description: str
-	confidence: float = 0.8  # Default confidence score
+def decide_action(insight: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+	"""Decide what action to take based on a dict-style insight."""
 
+	kind = insight.get("kind", "anomaly")
+	insight_conf = float(insight.get("confidence", 0.8))
 
-class Decision(BaseModel):
-	action_type: str
-	priority: str = "normal"  # low, normal, high, critical
-	reasoning: str
-	confidence: float = 0.8  # Default confidence score
-
-
-class Action(BaseModel):
-	action_type: str
-	details: Dict[str, Any]
-	status: str = "pending_approval"  # pending_approval, in_progress, executed, failed, approved, rejected
-	confidence: float = 0.8  # Default confidence score
-	approval_required: bool = True
-
-
-def decide_action(insight: Insight) -> tuple[Decision, Action]:
-	"""Decide what action to take based on insight."""
-	
-	# Define action mappings with confidence scores
 	action_mappings = {
 		"anomaly": [
 			("send_alert", 0.9, "high"),
@@ -58,67 +34,58 @@ def decide_action(insight: Insight) -> tuple[Decision, Action]:
 			("document_pattern", 0.6, "low")
 		]
 	}
-	
-	# Get available actions for this insight type
-	available_actions = action_mappings.get(insight.kind, action_mappings["anomaly"])
-	
-	# Select action based on insight confidence
-	if insight.confidence >= 0.9:
-		action_type, confidence, priority = available_actions[0]  # Highest confidence action
-	elif insight.confidence >= 0.7:
-		action_type, confidence, priority = available_actions[1]  # Medium confidence action
+
+	available_actions = action_mappings.get(kind, action_mappings["anomaly"])
+	if insight_conf >= 0.9:
+		action_type, base_conf, priority = available_actions[0]
+	elif insight_conf >= 0.7:
+		action_type, base_conf, priority = available_actions[1]
 	else:
-		action_type, confidence, priority = available_actions[2]  # Lower confidence action
-	
-	# Adjust confidence based on insight confidence
-	final_confidence = min(insight.confidence * confidence, 1.0)
-	
-	# Determine status based on confidence
+		action_type, base_conf, priority = available_actions[2]
+
+	final_confidence = min(insight_conf * base_conf, 1.0)
 	if final_confidence >= 0.9:
-		status = "executed"
-		approval_required = False
+		status = "executed"; approval_required = False
 	elif final_confidence >= 0.7:
-		status = "in_progress"
-		approval_required = False
+		status = "in_progress"; approval_required = False
 	else:
-		status = "pending_approval"
-		approval_required = True
-	
-	decision = Decision(
-		action_type=action_type,
-		priority=priority,
-		reasoning=f"Based on {insight.kind} detection with {insight.confidence:.1%} confidence",
-		confidence=final_confidence
-	)
-	
-	action = Action(
-		action_type=action_type,
-		details={
-			"insight_id": f"{insight.metric}_{insight.kind}",
-			"metric": insight.metric,
-			"description": insight.description
+		status = "pending_approval"; approval_required = True
+
+	decision: Dict[str, Any] = {
+		"action_type": action_type,
+		"priority": priority,
+		"reasoning": f"Based on {kind} detection with {insight_conf:.1%} confidence",
+		"confidence": final_confidence,
+	}
+
+	action: Dict[str, Any] = {
+		"action_type": action_type,
+		"details": {
+			"insight_id": f"{insight.get('metric','metric')}_{kind}",
+			"metric": insight.get("metric"),
+			"description": insight.get("description"),
 		},
-		status=status,
-		confidence=final_confidence,
-		approval_required=approval_required
-	)
-	
+		"status": status,
+		"confidence": final_confidence,
+		"approval_required": approval_required,
+	}
+
 	return decision, action
 
 
-def approve_action(action: Action) -> Action:
-	"""Approve a pending action."""
-	if action.status == "pending_approval":
-		action.status = "approved"
-		action.approval_required = False
+def approve_action(action: Dict[str, Any]) -> Dict[str, Any]:
+	"""Approve a pending action (dict)."""
+	if action.get("status") == "pending_approval":
+		action["status"] = "approved"
+		action["approval_required"] = False
 	return action
 
 
-def reject_action(action: Action) -> Action:
-	"""Reject a pending action."""
-	if action.status == "pending_approval":
-		action.status = "rejected"
-		action.approval_required = False
+def reject_action(action: Dict[str, Any]) -> Dict[str, Any]:
+	"""Reject a pending action (dict)."""
+	if action.get("status") == "pending_approval":
+		action["status"] = "rejected"
+		action["approval_required"] = False
 	return action
 
 
