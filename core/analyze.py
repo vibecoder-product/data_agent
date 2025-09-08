@@ -362,20 +362,49 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 	"""Discover recurring patterns: seasonality strength, trend direction, correlations, recurring segments."""
 	patterns: List[Pattern] = []
 	local_df = df.copy()
+	
+	# Debug: Print initial data info (commented out for production)
+	# print(f"🔍 Pattern Detection Debug:")
+	# print(f"  Original data shape: {df.shape}")
+	# print(f"  Columns: {list(df.columns)}")
+	# print(f"  Looking for date column: '{date_col}'")
+	
 	if date_col in local_df.columns:
 		local_df[date_col] = pd.to_datetime(local_df[date_col], errors="coerce")
 		local_df = local_df.dropna(subset=[date_col])
+		# print(f"  ✅ Found date column '{date_col}', {len(local_df)} rows after date parsing")
+	else:
+		# print(f"  ❌ Date column '{date_col}' not found. Available columns: {list(local_df.columns)}")
+		# Try to find any date-like column
+		date_candidates = [col for col in local_df.columns if 'date' in col.lower() or 'time' in col.lower()]
+		if date_candidates:
+			date_col = date_candidates[0]
+			# print(f"  🔄 Trying alternative date column: '{date_col}'")
+			local_df[date_col] = pd.to_datetime(local_df[date_col], errors="coerce")
+			local_df = local_df.dropna(subset=[date_col])
+		# else:
+		# 	print(f"  ⚠️ No date columns found, will skip time-based patterns")
 
 	numeric_cols = [c for c in local_df.select_dtypes(include=[np.number]).columns if c != date_col]
 	cat_cols = [c for c in local_df.select_dtypes(include=["object", "category"]).columns]
+	
+	# print(f"  Numeric columns: {numeric_cols}")
+	# print(f"  Categorical columns: {cat_cols}")
 
 	# Global seasonality and trend per metric
 	if date_col in local_df.columns and numeric_cols:
+		# print(f"  📊 Analyzing time-based patterns...")
 		g = local_df.groupby(date_col)[numeric_cols].sum(min_count=1).sort_index()
+		# print(f"  Grouped data shape: {g.shape}")
+		
 		for m in numeric_cols:
 			y = g[m].astype(float).fillna(0.0)
+			# print(f"    Analyzing metric '{m}': {len(y)} data points")
+			
 			if len(y) < 14:
+				# print(f"    ⚠️ Skipping '{m}': insufficient data points ({len(y)} < 14)")
 				continue
+				
 			# Simple seasonal strength estimation using rolling mean
 			period = max(7, min(30, max(7, len(y)//6)))
 			rolling_mean = y.rolling(window=period, center=True).mean()
@@ -383,7 +412,11 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 			total_var = np.var(y) + 1e-9
 			seasonal_strength = float(min(1.0, max(0.0, seasonal_var / total_var)))
 			trend_slope = float(np.polyfit(np.arange(len(y)), y.values, 1)[0])
-			if seasonal_strength > 0.15:
+			
+			# print(f"    📈 '{m}': seasonal_strength={seasonal_strength:.3f}, trend_slope={trend_slope:.3f}")
+			
+			if seasonal_strength > 0.05:  # Lowered from 0.15 to 0.05
+				# print(f"    ✅ Found seasonality in '{m}' (strength={seasonal_strength:.3f})")
 				patterns.append(Pattern(
 					pattern="seasonality",
 					metric=m,
@@ -393,6 +426,8 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 					strength=seasonal_strength,
 					context={}
 				))
+			# else:
+			# 	print(f"    ❌ No seasonality in '{m}' (strength={seasonal_strength:.3f} < 0.05)")
 			patterns.append(Pattern(
 				pattern="trend",
 				metric=m,
@@ -405,6 +440,7 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 
 	# Correlations between metrics
 	if len(numeric_cols) >= 2 and date_col in local_df.columns:
+		# print(f"  🔗 Analyzing correlations...")
 		g = local_df.groupby(date_col)[numeric_cols].sum(min_count=1).sort_index()
 		corr = g.corr().abs()
 		corr.values[[np.arange(corr.shape[0])]*2] = 0.0
@@ -413,8 +449,11 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 			for j in range(i+1, len(corr.columns)):
 				pairs.append((corr.index[i], corr.columns[j], float(corr.iloc[i, j])))
 		pairs = sorted(pairs, key=lambda x: x[2], reverse=True)[:5]
+		# print(f"  Top correlations: {[(a, b, f'{r:.3f}') for a, b, r in pairs]}")
+		
 		for a, b, r in pairs:
-			if r > 0.6:
+			if r > 0.3:  # Lowered from 0.6 to 0.3
+				# print(f"    ✅ Found correlation: {a} ~ {b} (r={r:.3f})")
 				patterns.append(Pattern(
 					pattern="correlation",
 					metric=f"{a}~{b}",
@@ -424,6 +463,10 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 					strength=r,
 					context={}
 				))
+			# else:
+			# 	print(f"    ❌ No strong correlation: {a} ~ {b} (r={r:.3f} < 0.3)")
+	# else:
+	# 	print(f"  ⚠️ Skipping correlations: need >=2 numeric columns and date column")
 
 	# Recurring anomalous segments (segments with multiple anomalies across time)
 	if cat_cols and date_col in local_df.columns and numeric_cols:
@@ -457,6 +500,12 @@ def discover_patterns(df: pd.DataFrame, date_col: str = "date") -> List[Pattern]
 
 	# Rank patterns by strength
 	patterns = sorted(patterns, key=lambda p: p.strength, reverse=True)
+	
+	# print(f"  🎯 Pattern Detection Summary:")
+	# print(f"    Total patterns found: {len(patterns)}")
+	# for i, p in enumerate(patterns):
+	# 	print(f"    {i+1}. {p.pattern} in {p.metric} (strength={p.strength:.3f})")
+	
 	return patterns
 
 
@@ -541,7 +590,19 @@ def analyze_data_autonomously(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], L
 				})
 	
 	# Detect patterns across metrics
-	patterns.extend(detect_patterns(df))
+	discovered_patterns = discover_patterns(df)
+	# Convert Pattern objects to dictionaries
+	for p in discovered_patterns:
+		patterns.append({
+			"pattern": p.pattern,
+			"metric": p.metric,
+			"dimension": p.dimension,
+			"segment": p.segment,
+			"description": p.description,
+			"strength": p.strength,
+			"confidence": min(0.95, p.strength + 0.1),  # Convert strength to confidence
+			"context": p.context
+		})
 	
 	return insights, patterns
 

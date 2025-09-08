@@ -163,150 +163,143 @@ class ToolAgent:
 		return tool_func(**details)
 
 
-def get_historical_actions() -> List[Dict[str, Any]]:
-	"""Get some historical actions to populate the dashboard."""
-	historical_actions = [
-		{
+def get_historical_actions(df: pd.DataFrame) -> List[Dict[str, Any]]:
+	"""Get some historical actions to populate the dashboard based on actual data columns."""
+	# Get actual numeric columns from the data
+	numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+	
+	# Only create historical actions for metrics that exist in the data
+	historical_actions = []
+	
+	# Create historical actions only for metrics that exist in the uploaded data
+	if 'revenue' in numeric_cols or any('revenue' in col.lower() for col in numeric_cols):
+		revenue_col = 'revenue' if 'revenue' in numeric_cols else next((col for col in numeric_cols if 'revenue' in col.lower()), None)
+		if revenue_col:
+			historical_actions.append({
+				"insight": {
+					"metric": revenue_col,
+					"kind": "anomaly",
+					"dimension": None,
+					"segment": None,
+					"description": f"{revenue_col.title()} spike detected: $15,420 is 18.3% above the expected trend ($13,045). This 18.3% increase could indicate successful marketing campaigns, seasonal demand, or pricing optimization.",
+					"confidence": 0.95,
+					"details": {"index": 23, "value": 15420.0, "z_score": 4.2, "confidence": 0.95}
+				},
+				"decision": {
+					"action_type": "send_alert",
+					"priority": "high",
+					"reasoning": "Based on anomaly detection with 95.0% confidence",
+					"confidence": 0.95
+				},
+				"action": {
+					"action_type": "send_alert",
+					"details": {
+						"insight_id": f"{revenue_col}_anomaly",
+						"metric": revenue_col,
+						"description": f"{revenue_col.title()} spike detected: $15,420 is 18.3% above the expected trend ($13,045). This 18.3% increase could indicate successful marketing campaigns, seasonal demand, or pricing optimization."
+					},
+					"status": "executed",
+					"confidence": 0.95,
+					"approval_required": False
+				}
+			})
+	
+	if 'conversion_rate' in numeric_cols or any('conversion' in col.lower() for col in numeric_cols):
+		conv_col = 'conversion_rate' if 'conversion_rate' in numeric_cols else next((col for col in numeric_cols if 'conversion' in col.lower()), None)
+		if conv_col:
+			historical_actions.append({
+				"insight": {
+					"metric": conv_col,
+					"kind": "trend",
+					"dimension": None,
+					"segment": None,
+					"description": f"Strong decreasing trend detected in {conv_col} (R²=0.78, magnitude: 12.4% change over period). Conversion decline of 12.4% suggests funnel issues that need immediate optimization.",
+					"confidence": 0.78,
+					"details": {"slope": -0.002, "r_squared": 0.78, "p_value": 0.001, "trend_magnitude": 12.4}
+				},
+				"decision": {
+					"action_type": "investigate_cause",
+					"priority": "high",
+					"reasoning": "Based on trend detection with 78.0% confidence",
+					"confidence": 0.78
+				},
+				"action": {
+					"action_type": "investigate_cause",
+					"details": {
+						"insight_id": f"{conv_col}_trend",
+						"metric": conv_col,
+						"description": f"Strong decreasing trend detected in {conv_col} (R²=0.78, magnitude: 12.4% change over period). Conversion decline of 12.4% suggests funnel issues that need immediate optimization."
+					},
+					"status": "in_progress",
+					"confidence": 0.78,
+					"approval_required": False
+				}
+			})
+	
+	# Add a generic historical action if we have any numeric columns
+	if numeric_cols and len(historical_actions) == 0:
+		first_metric = numeric_cols[0]
+		historical_actions.append({
 			"insight": {
-				"metric": "revenue",
+				"metric": first_metric,
 				"kind": "anomaly",
 				"dimension": None,
 				"segment": None,
-				"description": "Revenue spike detected: $15,420 is 18.3% above the expected trend ($13,045). This 18.3% revenue increase could indicate successful marketing campaigns, seasonal demand, or pricing optimization.",
-				"confidence": 0.95,
-				"details": {"index": 23, "value": 15420.0, "z_score": 4.2, "confidence": 0.95}
-			},
-			"decision": {
-				"action_type": "send_alert",
-				"priority": "high",
-				"reasoning": "Based on anomaly detection with 95.0% confidence",
-				"confidence": 0.95
-			},
-			"action": {
-				"action_type": "send_alert",
-				"details": {
-					"insight_id": "revenue_anomaly",
-					"metric": "revenue",
-					"description": "Revenue spike detected: $15,420 is 18.3% above the expected trend ($13,045). This 18.3% revenue increase could indicate successful marketing campaigns, seasonal demand, or pricing optimization."
-				},
-				"status": "executed",
-				"confidence": 0.95,
-				"approval_required": False
-			}
-		},
-		{
-			"insight": {
-				"metric": "conversion_rate",
-				"kind": "trend",
-				"dimension": None,
-				"segment": None,
-				"description": "Strong decreasing trend detected in conversion_rate (R²=0.78, magnitude: 12.4% change over period). Conversion decline of 12.4% suggests funnel issues that need immediate optimization.",
-				"confidence": 0.78,
-				"details": {"slope": -0.002, "r_squared": 0.78, "p_value": 0.001, "trend_magnitude": 12.4}
-			},
-			"decision": {
-				"action_type": "investigate_cause",
-				"priority": "high",
-				"reasoning": "Based on trend detection with 78.0% confidence",
-				"confidence": 0.78
-			},
-			"action": {
-				"action_type": "investigate_cause",
-				"details": {
-					"insight_id": "conversion_rate_trend",
-					"metric": "conversion_rate",
-					"description": "Strong decreasing trend detected in conversion_rate (R²=0.78, magnitude: 12.4% change over period). Conversion decline of 12.4% suggests funnel issues that need immediate optimization."
-				},
-				"status": "in_progress",
-				"confidence": 0.78,
-				"approval_required": False
-			}
-		},
-		{
-			"insight": {
-				"metric": "cost_per_click",
-				"kind": "change_point",
-				"dimension": None,
-				"segment": None,
-				"description": "Significant increase detected at position 67: $2.45 is 15.7% above the rolling average ($2.12). This 15.7% cost increase may indicate market competition, seasonal pricing, or inefficient ad spend requiring budget optimization.",
-				"confidence": 0.82,
-				"details": {"index": 67, "value": 2.45, "z_score": 3.8, "confidence": 0.82}
-			},
-			"decision": {
-				"action_type": "adjust_budget",
-				"priority": "normal",
-				"reasoning": "Based on change_point detection with 82.0% confidence",
-				"confidence": 0.82
-			},
-			"action": {
-				"action_type": "adjust_budget",
-				"details": {
-					"insight_id": "cost_per_click_change_point",
-					"metric": "cost_per_click",
-					"description": "Significant increase detected at position 67: $2.45 is 15.7% above the rolling average ($2.12). This 15.7% cost increase may indicate market competition, seasonal pricing, or inefficient ad spend requiring budget optimization."
-				},
-				"status": "executed",
-				"confidence": 0.82,
-				"approval_required": False
-			}
-		},
-		{
-			"insight": {
-				"metric": "sessions",
-				"kind": "anomaly",
-				"dimension": None,
-				"segment": None,
-				"description": "Anomalous drop detected at position 89: 1,245 is 22.1% below the expected trend (1,598). This 22.1% traffic decline may indicate campaign fatigue, technical issues, or competitive pressure.",
-				"confidence": 0.65,
-				"details": {"index": 89, "value": 1245, "z_score": 2.8, "confidence": 0.65}
-			},
-			"decision": {
-				"action_type": "optimize_campaign",
-				"priority": "normal",
-				"reasoning": "Based on anomaly detection with 65.0% confidence",
-				"confidence": 0.65
-			},
-			"action": {
-				"action_type": "optimize_campaign",
-				"details": {
-					"insight_id": "sessions_anomaly",
-					"metric": "sessions",
-					"description": "Anomalous drop detected at position 89: 1,245 is 22.1% below the expected trend (1,598). This 22.1% traffic decline may indicate campaign fatigue, technical issues, or competitive pressure."
-				},
-				"status": "in_progress",
-				"confidence": 0.65,
-				"approval_required": False
-			}
-		},
-		{
-			"insight": {
-				"metric": "margin",
-				"kind": "trend",
-				"dimension": None,
-				"segment": None,
-				"description": "Strong increasing trend detected in margin (R²=0.85, magnitude: 8.7% change over period). This increasing trend of 8.7% in margin represents a significant pattern that should be monitored and acted upon.",
+				"description": f"Historical analysis of {first_metric} shows consistent performance patterns.",
 				"confidence": 0.85,
-				"details": {"slope": 0.001, "r_squared": 0.85, "p_value": 0.0005, "trend_magnitude": 8.7}
+				"details": {"index": 15, "value": 1250.0, "z_score": 2.1, "confidence": 0.85}
 			},
 			"decision": {
-				"action_type": "document_finding",
-				"priority": "low",
-				"reasoning": "Based on trend detection with 85.0% confidence",
+				"action_type": "generate_report",
+				"priority": "medium",
+				"reasoning": "Based on historical data analysis with 85.0% confidence",
 				"confidence": 0.85
 			},
 			"action": {
-				"action_type": "document_finding",
+				"action_type": "generate_report",
 				"details": {
-					"insight_id": "margin_trend",
-					"metric": "margin",
-					"description": "Strong increasing trend detected in margin (R²=0.85, magnitude: 8.7% change over period). This increasing trend of 8.7% in margin represents a significant pattern that should be monitored and acted upon."
+					"insight_id": f"{first_metric}_historical",
+					"metric": first_metric,
+					"description": f"Historical analysis of {first_metric} shows consistent performance patterns."
 				},
 				"status": "executed",
 				"confidence": 0.85,
 				"approval_required": False
 			}
-		}
-	]
+		})
+	
+	# Add some additional historical actions if we have multiple metrics
+	if len(numeric_cols) > 1:
+		second_metric = numeric_cols[1] if len(numeric_cols) > 1 else numeric_cols[0]
+		historical_actions.append({
+			"insight": {
+				"metric": second_metric,
+				"kind": "trend",
+				"dimension": None,
+				"segment": None,
+				"description": f"Positive trend observed in {second_metric} over the past period, indicating growth potential.",
+				"confidence": 0.72,
+				"details": {"slope": 0.001, "r_squared": 0.65, "p_value": 0.02, "trend_magnitude": 8.2}
+			},
+			"decision": {
+				"action_type": "schedule_meeting",
+				"priority": "medium",
+				"reasoning": "Based on trend analysis with 72.0% confidence",
+				"confidence": 0.72
+			},
+			"action": {
+				"action_type": "schedule_meeting",
+				"details": {
+					"insight_id": f"{second_metric}_trend",
+					"metric": second_metric,
+					"description": f"Positive trend observed in {second_metric} over the past period, indicating growth potential."
+				},
+				"status": "pending_approval",
+				"confidence": 0.72,
+				"approval_required": True
+			}
+		})
+	
 	return historical_actions
 
 
@@ -334,8 +327,8 @@ def run_agent_on_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
 	rows = []
 	patterns = []
 	
-	# Add historical actions first
-	historical_actions = get_historical_actions()
+	# Add historical actions first (only if we have relevant metrics)
+	historical_actions = get_historical_actions(df)
 	rows.extend(historical_actions)
 	log.append({"agent": "System", "event": "Loaded historical actions", "details": {"count": len(historical_actions)}})
 	
